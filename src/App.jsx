@@ -1,228 +1,217 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import './App.css';
 import referenceImage from './assets/image.jpeg';
 import referenceVideo from './assets/video.MOV';
 
-// Canvas-based pixel comparison
-const compareImages = (uploadedFile, refSrc) => {
-  return new Promise((resolve) => {
-    const SIZE = 150;
-    const c1 = document.createElement('canvas');
-    const c2 = document.createElement('canvas');
-    c1.width = c2.width = SIZE;
-    c1.height = c2.height = SIZE;
-    const x1 = c1.getContext('2d');
-    const x2 = c2.getContext('2d');
+/* ── colour-histogram matcher ─────────────────────────── */
+const buildHist = (data, len) => {
+  const B = 12;
+  const h = new Float32Array(B * 3);
+  for (let i = 0; i < len; i += 4) {
+    h[Math.floor(data[i] / (256 / B))]++;
+    h[B + Math.floor(data[i + 1] / (256 / B))]++;
+    h[B * 2 + Math.floor(data[i + 2] / (256 / B))]++;
+  }
+  return h;
+};
 
-    const img1 = new Image();
-    const img2 = new Image();
-    img2.crossOrigin = 'anonymous';
+const histSim = (a, b) => {
+  let dot = 0, m1 = 0, m2 = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    m1 += a[i] * a[i];
+    m2 += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(m1) * Math.sqrt(m2) + 1e-10);
+};
 
-    img1.onload = () => {
-      x1.drawImage(img1, 0, 0, SIZE, SIZE);
-      img2.onload = () => {
-        x2.drawImage(img2, 0, 0, SIZE, SIZE);
-        const d1 = x1.getImageData(0, 0, SIZE, SIZE).data;
-        const d2 = x2.getImageData(0, 0, SIZE, SIZE).data;
-        let diff = 0;
-        for (let i = 0; i < d1.length; i += 4) {
-          diff += Math.abs(d1[i] - d2[i]);
-          diff += Math.abs(d1[i + 1] - d2[i + 1]);
-          diff += Math.abs(d1[i + 2] - d2[i + 2]);
-        }
-        const maxDiff = SIZE * SIZE * 3 * 255;
-        const similarity = 1 - diff / maxDiff;
-        resolve(similarity);
-      };
-      img2.src = refSrc;
-    };
-    img1.src = URL.createObjectURL(uploadedFile);
-  });
+/* ── pixel-level similarity ───────────────────────────── */
+const pixelSim = (d1, d2, len) => {
+  let diff = 0;
+  for (let i = 0; i < len; i += 4) {
+    diff += Math.abs(d1[i] - d2[i]);
+    diff += Math.abs(d1[i + 1] - d2[i + 1]);
+    diff += Math.abs(d1[i + 2] - d2[i + 2]);
+  }
+  return 1 - diff / ((len / 4) * 3 * 255);
 };
 
 function App() {
-  const [uploadedImage, setUploadedImage] = useState(null);
-  const [uploadedImageName, setUploadedImageName] = useState('');
-  const [comparing, setComparing] = useState(false);
-  const [matchResult, setMatchResult] = useState(null); // null | 'match' | 'no-match'
-  const [similarity, setSimilarity] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const imageInputRef = useRef(null);
-  const videoRef = useRef(null);
+  const [stage, setStage] = useState('start'); // start | scanning | matched
+  const [simScore, setSimScore] = useState(0);
 
-  const handleImageUpload = async (file) => {
-    if (!file || !file.type.startsWith('image/')) return;
-    const url = URL.createObjectURL(file);
-    setUploadedImage(url);
-    setUploadedImageName(file.name);
-    setMatchResult(null);
-    setSimilarity(0);
+  const camRef = useRef(null);
+  const canvasRef = useRef(null);
+  const overlayRef = useRef(null);
+  const refImg = useRef(null);
+  const refData = useRef(null);
+  const refHist = useRef(null);
+  const streamRef = useRef(null);
+  const intervalRef = useRef(null);
 
-    // Compare
-    setComparing(true);
+  const SZ = 80; // compare thumbnail size
+
+  /* preload reference image data */
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      refImg.current = img;
+      const c = document.createElement('canvas');
+      c.width = c.height = SZ;
+      const x = c.getContext('2d');
+      x.drawImage(img, 0, 0, SZ, SZ);
+      const d = x.getImageData(0, 0, SZ, SZ).data;
+      refData.current = d;
+      refHist.current = buildHist(d, d.length);
+    };
+    img.src = referenceImage;
+    return () => {
+      stopEverything();
+    };
+  }, []);
+
+  const stopEverything = () => {
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+  };
+
+  /* ── Start Camera ─────────────────────────────────────── */
+  const openCamera = async () => {
     try {
-      const sim = await compareImages(file, referenceImage);
-      setSimilarity(Math.round(sim * 100));
-      if (sim >= 0.80) {
-        setMatchResult('match');
-        setTimeout(() => videoRef.current?.play(), 300);
-      } else {
-        setMatchResult('no-match');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (camRef.current) {
+        camRef.current.srcObject = stream;
+        await camRef.current.play();
       }
-    } catch (e) {
-      setMatchResult('no-match');
+      setStage('scanning');
+      startScan();
+    } catch {
+      alert('Camera access denied — please allow camera permission and reload.');
     }
-    setComparing(false);
   };
 
-  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
-  const handleDragLeave = () => setIsDragging(false);
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setIsDragging(false);
-    handleImageUpload(e.dataTransfer.files[0]);
+  /* ── Scan Loop ────────────────────────────────────────── */
+  const startScan = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    intervalRef.current = setInterval(() => {
+      if (!camRef.current || !canvasRef.current || !refData.current) return;
+
+      const v = camRef.current;
+      const vw = v.videoWidth, vh = v.videoHeight;
+      if (!vw || !vh) return;
+
+      const c = canvasRef.current;
+      const ctx = c.getContext('2d');
+      c.width = c.height = SZ;
+
+      // centre crop of camera
+      const crop = Math.min(vw, vh) * 0.55;
+      const sx = (vw - crop) / 2, sy = (vh - crop) / 2;
+      ctx.drawImage(v, sx, sy, crop, crop, 0, 0, SZ, SZ);
+      const camData = ctx.getImageData(0, 0, SZ, SZ).data;
+
+      const hScore = histSim(buildHist(camData, camData.length), refHist.current);
+      const pScore = pixelSim(camData, refData.current, camData.length);
+      const combined = hScore * 0.55 + pScore * 0.45;
+
+      setSimScore(Math.round(combined * 100));
+
+      if (combined >= 0.72) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+        setStage('matched');
+        setTimeout(() => {
+          if (overlayRef.current) {
+            overlayRef.current.play().catch(() => {});
+          }
+        }, 400);
+      }
+    }, 400);
   };
 
-  const reset = () => {
-    setUploadedImage(null);
-    setUploadedImageName('');
-    setMatchResult(null);
-    setSimilarity(0);
-    if (videoRef.current) videoRef.current.pause();
+  const scanAgain = () => {
+    if (overlayRef.current) overlayRef.current.pause();
+    setSimScore(0);
+    setStage('scanning');
+    startScan();
   };
 
+  /* ── RENDER ───────────────────────────────────────────── */
   return (
     <div className="app">
-      {/* Header */}
-      <header className="header">
-        <div className="header-glow" />
-        <div className="header-content">
-          <div className="logo">
-            <span className="logo-icon">🔐</span>
-            <span className="logo-text">FaceVault</span>
+
+      {/* ─── START SCREEN ─────────────────────────────── */}
+      {stage === 'start' && (
+        <div className="start-screen">
+          <div className="glow glow-1" />
+          <div className="glow glow-2" />
+          <div className="start-body">
+            <div className="start-icon">📷</div>
+            <h1 className="start-title">FaceVault</h1>
+            <p className="start-sub">Point your camera at the printed image to unlock a secret video</p>
+            <button className="cam-btn" onClick={openCamera}>
+              <span className="cam-btn-icon">🔓</span>
+              Open Camera
+            </button>
           </div>
-          <p className="header-subtitle">Upload your image — unlock your video</p>
+          <footer className="start-footer">🎓 CE College · Batch 2023–2027</footer>
         </div>
-      </header>
+      )}
 
-      <main className="main">
-        <div className="two-col">
+      {/* ─── CAMERA + OVERLAYS ────────────────────────── */}
+      {stage !== 'start' && (
+        <div className="cam-screen">
+          {/* live camera feed */}
+          <video ref={camRef} autoPlay playsInline muted className="cam-feed" />
+          {/* hidden processing canvas */}
+          <canvas ref={canvasRef} className="hide" />
 
-          {/* LEFT — Upload */}
-          <section className="panel upload-panel">
-            <h2 className="panel-title"><span>📤</span> Upload Image</h2>
-
-            <div
-              className={`drop-zone ${isDragging ? 'dragging' : ''} ${uploadedImage ? 'has-file' : ''}`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => !uploadedImage && imageInputRef.current.click()}
-            >
-              {uploadedImage ? (
-                <div className="uploaded-preview">
-                  <img src={uploadedImage} alt="Uploaded" className="preview-img" />
-                  <button className="remove-btn" onClick={(e) => { e.stopPropagation(); reset(); }}>✕</button>
+          {/* scanning overlay */}
+          {stage === 'scanning' && (
+            <div className="scan-overlay">
+              <div className="scan-frame">
+                <span className="corner c-tl" />
+                <span className="corner c-tr" />
+                <span className="corner c-bl" />
+                <span className="corner c-br" />
+                <div className="scan-line" />
+              </div>
+              <div className="scan-info">
+                <p className="scan-label">🔍 Scanning…</p>
+                <p className="scan-hint">Hold the printed photo inside the frame</p>
+                <div className="sim-bar-wrap">
+                  <div className="sim-bar" style={{ width: `${simScore}%` }} />
                 </div>
-              ) : (
-                <div className="drop-content">
-                  <div className="drop-icon">🖼️</div>
-                  <p className="drop-text">Drag & Drop image here</p>
-                  <p className="drop-sub">or click to browse</p>
-                  <span className="fmt-badge">PNG • JPG • WEBP • GIF</span>
-                </div>
-              )}
+                <p className="sim-pct">{simScore}% match</p>
+              </div>
             </div>
+          )}
 
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden-input"
-              onChange={(e) => handleImageUpload(e.target.files[0])}
-            />
-
-            {!uploadedImage && (
-              <button className="upload-btn" onClick={() => imageInputRef.current.click()}>
-                Choose Image <span>🖼️</span>
-              </button>
-            )}
-
-            {/* Status */}
-            {comparing && (
-              <div className="status comparing">
-                <div className="spinner" />
-                <span>Comparing images...</span>
+          {/* matched — video overlay */}
+          {stage === 'matched' && (
+            <div className="match-overlay">
+              <video
+                ref={overlayRef}
+                src={referenceVideo}
+                controls
+                autoPlay
+                playsInline
+                className="overlay-video"
+              />
+              <div className="match-bar">
+                <span className="match-badge">✅ Image Matched!</span>
+                <button className="again-btn" onClick={scanAgain}>🔄 Scan Again</button>
               </div>
-            )}
-
-            {!comparing && matchResult === 'match' && (
-              <div className="status match">
-                <span className="status-icon">✅</span>
-                <div>
-                  <strong>Image Matched!</strong>
-                  <p>{similarity}% similarity — Playing your video 🎬</p>
-                </div>
-              </div>
-            )}
-
-            {!comparing && matchResult === 'no-match' && (
-              <div className="status no-match">
-                <span className="status-icon">❌</span>
-                <div>
-                  <strong>No Match</strong>
-                  <p>{similarity}% similarity — Try the correct image</p>
-                </div>
-              </div>
-            )}
-
-            {!uploadedImage && !comparing && (
-              <div className="hint-box">
-                <span>💡</span>
-                <p>Upload the reference image to unlock and play the secret video!</p>
-              </div>
-            )}
-          </section>
-
-          {/* RIGHT — Reference + Video */}
-          <section className="panel video-panel">
-            <h2 className="panel-title"><span>🖼️</span> Reference Image</h2>
-            <div className="ref-img-wrap">
-              <img src={referenceImage} alt="Reference" className="ref-img" />
-              <div className="ref-label">This is the key image</div>
             </div>
-
-            <h2 className="panel-title video-title">
-              <span>🎬</span> Secret Video
-              {matchResult === 'match' && <span className="unlocked-badge">🔓 UNLOCKED</span>}
-              {matchResult !== 'match' && <span className="locked-badge">🔒 LOCKED</span>}
-            </h2>
-
-            <div className={`video-wrap ${matchResult === 'match' ? 'video-active' : 'video-locked'}`}>
-              {matchResult === 'match' ? (
-                <video
-                  ref={videoRef}
-                  src={referenceVideo}
-                  controls
-                  autoPlay
-                  className="video-player"
-                >
-                  Your browser does not support video.
-                </video>
-              ) : (
-                <div className="video-placeholder">
-                  <div className="lock-icon">🔒</div>
-                  <p>Upload the matching image to unlock this video</p>
-                </div>
-              )}
-            </div>
-          </section>
+          )}
         </div>
-      </main>
-
-      <footer className="footer">
-        <p>🎓 FaceVault — CE College Engineering · Batch 2023–2027</p>
-      </footer>
+      )}
     </div>
   );
 }
