@@ -39,24 +39,23 @@ const pixelSim = (d1, d2, len) => {
 function App() {
   const [stage, setStage] = useState('start'); // start | scanning | matched
   const [simScore, setSimScore] = useState(0);
+  const [camReady, setCamReady] = useState(false);
 
   const camRef = useRef(null);
   const canvasRef = useRef(null);
   const overlayRef = useRef(null);
-  const refImg = useRef(null);
   const refData = useRef(null);
   const refHist = useRef(null);
   const streamRef = useRef(null);
   const intervalRef = useRef(null);
 
-  const SZ = 80; // compare thumbnail size
+  const SZ = 80;
 
   /* preload reference image data */
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      refImg.current = img;
       const c = document.createElement('canvas');
       c.width = c.height = SZ;
       const x = c.getContext('2d');
@@ -66,9 +65,7 @@ function App() {
       refHist.current = buildHist(d, d.length);
     };
     img.src = referenceImage;
-    return () => {
-      stopEverything();
-    };
+    return () => stopEverything();
   }, []);
 
   const stopEverything = () => {
@@ -78,20 +75,49 @@ function App() {
 
   /* ── Start Camera ─────────────────────────────────────── */
   const openCamera = async () => {
+    setStage('scanning');
+    setCamReady(false);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
+
       streamRef.current = stream;
-      if (camRef.current) {
-        camRef.current.srcObject = stream;
-        await camRef.current.play();
-      }
-      setStage('scanning');
-      startScan();
-    } catch {
-      alert('Camera access denied — please allow camera permission and reload.');
+
+      // Wait for DOM to have the video element
+      setTimeout(() => {
+        const vid = camRef.current;
+        if (!vid) return;
+
+        vid.setAttribute('autoplay', '');
+        vid.setAttribute('playsinline', '');
+        vid.setAttribute('muted', '');
+        vid.muted = true;
+        vid.srcObject = stream;
+
+        vid.onloadedmetadata = () => {
+          vid.play().then(() => {
+            setCamReady(true);
+            startScan();
+          }).catch(() => {
+            // autoplay blocked, try once more
+            vid.play().then(() => {
+              setCamReady(true);
+              startScan();
+            }).catch(err => console.warn('play err', err));
+          });
+        };
+      }, 100);
+
+    } catch (err) {
+      alert('Camera access denied. Please allow camera and reload.\n\n' + err.message);
+      setStage('start');
     }
   };
 
@@ -100,13 +126,13 @@ function App() {
     if (intervalRef.current) clearInterval(intervalRef.current);
 
     intervalRef.current = setInterval(() => {
-      if (!camRef.current || !canvasRef.current || !refData.current) return;
-
       const v = camRef.current;
+      const c = canvasRef.current;
+      if (!v || !c || !refData.current) return;
+
       const vw = v.videoWidth, vh = v.videoHeight;
       if (!vw || !vh) return;
 
-      const c = canvasRef.current;
       const ctx = c.getContext('2d');
       c.width = c.height = SZ;
 
@@ -165,12 +191,28 @@ function App() {
       )}
 
       {/* ─── CAMERA + OVERLAYS ────────────────────────── */}
-      {stage !== 'start' && (
+      {(stage === 'scanning' || stage === 'matched') && (
         <div className="cam-screen">
-          {/* live camera feed */}
-          <video ref={camRef} autoPlay playsInline muted className="cam-feed" />
+          {/* live camera feed — always rendered */}
+          <video
+            ref={camRef}
+            autoPlay
+            playsInline
+            muted
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              zIndex: 1,
+              background: '#000',
+            }}
+          />
+
           {/* hidden processing canvas */}
-          <canvas ref={canvasRef} className="hide" />
+          <canvas ref={canvasRef} style={{ display: 'none' }} />
 
           {/* scanning overlay */}
           {stage === 'scanning' && (
