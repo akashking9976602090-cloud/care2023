@@ -1,78 +1,95 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import './App.css';
 import referenceImage from './assets/image.jpeg';
 import referenceVideo from './assets/video.mp4';
 
 /* ══════════════════════════════════════════════════════════
-   STRICT IMAGE MATCHER
-   - Fine-grained colour histogram (24 bins per channel)
-   - Pixel-level comparison
-   - Edge/gradient structure comparison
-   - Requires 3 consecutive matches (temporal stability)
+   PERCEPTUAL HASH + BLOCK FINGERPRINT IMAGE MATCHER
+   Very strict — only triggers on THE specific image.
    ══════════════════════════════════════════════════════════ */
 
-const BINS = 24; // more bins = more specific matching
+/* Average Hash (aHash): 8x8 grayscale → 64-bit binary hash */
+const computeAHash = (imgData, w, h) => {
+  // convert to 8x8 grayscale grid
+  const grid = new Float32Array(64);
+  const cellW = w / 8, cellH = h / 8;
+  const data = imgData;
 
-/* colour histogram */
-const buildHist = (data, len) => {
-  const h = new Float32Array(BINS * 3);
-  for (let i = 0; i < len; i += 4) {
-    h[Math.floor(data[i] * BINS / 256)]++;
-    h[BINS + Math.floor(data[i + 1] * BINS / 256)]++;
-    h[BINS * 2 + Math.floor(data[i + 2] * BINS / 256)]++;
-  }
-  // normalise
-  const total = len / 4;
-  for (let i = 0; i < h.length; i++) h[i] /= total;
-  return h;
-};
-
-const histSim = (a, b) => {
-  // Bhattacharyya coefficient — stricter than cosine
-  let bc = 0;
-  for (let i = 0; i < a.length; i++) bc += Math.sqrt(a[i] * b[i]);
-  return bc;
-};
-
-/* pixel-level difference */
-const pixelSim = (d1, d2, len) => {
-  let diff = 0;
-  for (let i = 0; i < len; i += 4) {
-    diff += Math.abs(d1[i] - d2[i]);
-    diff += Math.abs(d1[i + 1] - d2[i + 1]);
-    diff += Math.abs(d1[i + 2] - d2[i + 2]);
-  }
-  return 1 - diff / ((len / 4) * 3 * 255);
-};
-
-/* edge structure — uses Sobel-like gradient magnitude */
-const buildEdge = (data, w, h) => {
-  const grey = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) {
-    grey[i] = data[i * 4] * 0.299 + data[i * 4 + 1] * 0.587 + data[i * 4 + 2] * 0.114;
-  }
-  const edge = new Float32Array(w * h);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const gx = -grey[(y - 1) * w + x - 1] + grey[(y - 1) * w + x + 1]
-               - 2 * grey[y * w + x - 1] + 2 * grey[y * w + x + 1]
-               - grey[(y + 1) * w + x - 1] + grey[(y + 1) * w + x + 1];
-      const gy = -grey[(y - 1) * w + x - 1] - 2 * grey[(y - 1) * w + x] - grey[(y - 1) * w + x + 1]
-               + grey[(y + 1) * w + x - 1] + 2 * grey[(y + 1) * w + x] + grey[(y + 1) * w + x + 1];
-      edge[y * w + x] = Math.sqrt(gx * gx + gy * gy);
+  for (let gy = 0; gy < 8; gy++) {
+    for (let gx = 0; gx < 8; gx++) {
+      let sum = 0, count = 0;
+      const startX = Math.floor(gx * cellW);
+      const startY = Math.floor(gy * cellH);
+      const endX = Math.floor((gx + 1) * cellW);
+      const endY = Math.floor((gy + 1) * cellH);
+      for (let y = startY; y < endY; y++) {
+        for (let x = startX; x < endX; x++) {
+          const idx = (y * w + x) * 4;
+          sum += data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+          count++;
+        }
+      }
+      grid[gy * 8 + gx] = sum / (count || 1);
     }
   }
-  return edge;
+
+  // compute mean and binary hash
+  let mean = 0;
+  for (let i = 0; i < 64; i++) mean += grid[i];
+  mean /= 64;
+  const hash = new Uint8Array(64);
+  for (let i = 0; i < 64; i++) hash[i] = grid[i] >= mean ? 1 : 0;
+  return hash;
 };
 
-const edgeSim = (e1, e2) => {
-  let dot = 0, m1 = 0, m2 = 0;
-  for (let i = 0; i < e1.length; i++) {
-    dot += e1[i] * e2[i];
-    m1 += e1[i] * e1[i];
-    m2 += e2[i] * e2[i];
+/* Hamming similarity between two hashes (0–1) */
+const hashSimilarity = (h1, h2) => {
+  let same = 0;
+  for (let i = 0; i < 64; i++) if (h1[i] === h2[i]) same++;
+  return same / 64;
+};
+
+/* Block colour fingerprint: 6x6 grid of avg RGB → 108 values */
+const computeBlockFP = (imgData, w, h) => {
+  const G = 6;
+  const fp = new Float32Array(G * G * 3);
+  const cellW = w / G, cellH = h / G;
+  const data = imgData;
+
+  for (let gy = 0; gy < G; gy++) {
+    for (let gx = 0; gx < G; gx++) {
+      let r = 0, g = 0, b = 0, count = 0;
+      const sx = Math.floor(gx * cellW), sy = Math.floor(gy * cellH);
+      const ex = Math.floor((gx + 1) * cellW), ey = Math.floor((gy + 1) * cellH);
+      for (let y = sy; y < ey; y++) {
+        for (let x = sx; x < ex; x++) {
+          const idx = (y * w + x) * 4;
+          r += data[idx]; g += data[idx + 1]; b += data[idx + 2];
+          count++;
+        }
+      }
+      const base = (gy * G + gx) * 3;
+      fp[base] = r / count; fp[base + 1] = g / count; fp[base + 2] = b / count;
+    }
   }
-  return dot / (Math.sqrt(m1) * Math.sqrt(m2) + 1e-10);
+  // normalise
+  let mag = 0;
+  for (let i = 0; i < fp.length; i++) mag += fp[i] * fp[i];
+  mag = Math.sqrt(mag) || 1;
+  for (let i = 0; i < fp.length; i++) fp[i] /= mag;
+  return fp;
+};
+
+const fpSimilarity = (a, b) => {
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot; // already normalised → cosine sim
+};
+
+/* ── Get image data from canvas ── */
+const getImageData = (ctx, source, size) => {
+  ctx.drawImage(source, 0, 0, size, size);
+  return ctx.getImageData(0, 0, size, size).data;
 };
 
 
@@ -83,41 +100,42 @@ function App() {
   const camRef = useRef(null);
   const canvasRef = useRef(null);
   const overlayRef = useRef(null);
-  const refData = useRef(null);
-  const refHist = useRef(null);
-  const refEdge = useRef(null);
   const streamRef = useRef(null);
   const intervalRef = useRef(null);
-  const matchStreak = useRef(0); // consecutive match counter
+  const rafRef = useRef(null);
 
-  const SZ = 100; // larger thumbnail = more accuracy
-  const MATCH_THRESHOLD = 0.82; // strict threshold
-  const REQUIRED_STREAK = 3;    // must match 3 times in a row
+  // Reference fingerprints
+  const refHash = useRef(null);
+  const refFP = useRef(null);
+  const matchStreak = useRef(0);
 
-  /* preload reference image */
+  const SZ = 120;
+  const THRESHOLD = 0.78;
+  const STREAK_NEEDED = 4;
+
+  /* ── Precompute reference fingerprints ── */
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       const c = document.createElement('canvas');
       c.width = c.height = SZ;
-      const x = c.getContext('2d');
-      x.drawImage(img, 0, 0, SZ, SZ);
-      const d = x.getImageData(0, 0, SZ, SZ).data;
-      refData.current = d;
-      refHist.current = buildHist(d, d.length);
-      refEdge.current = buildEdge(d, SZ, SZ);
+      const ctx = c.getContext('2d');
+      const data = getImageData(ctx, img, SZ);
+      refHash.current = computeAHash(data, SZ, SZ);
+      refFP.current = computeBlockFP(data, SZ, SZ);
     };
     img.src = referenceImage;
-    return () => stopEverything();
+    return () => stopAll();
   }, []);
 
-  const stopEverything = () => {
-    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+  const stopAll = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
   };
 
-  /* ── Start Camera ───── */
+  /* ── Open Camera ── */
   const openCamera = async () => {
     setStage('scanning');
     try {
@@ -127,26 +145,25 @@ function App() {
       });
       streamRef.current = stream;
       setTimeout(() => {
-        const vid = camRef.current;
-        if (!vid) return;
-        vid.setAttribute('autoplay', '');
-        vid.setAttribute('playsinline', '');
-        vid.setAttribute('muted', '');
-        vid.muted = true;
-        vid.srcObject = stream;
-        vid.onloadedmetadata = () => {
-          vid.play().then(() => startScan()).catch(() => {
-            vid.play().then(() => startScan()).catch(e => console.warn(e));
+        const v = camRef.current;
+        if (!v) return;
+        v.setAttribute('autoplay', '');
+        v.setAttribute('playsinline', '');
+        v.muted = true;
+        v.srcObject = stream;
+        v.onloadedmetadata = () => {
+          v.play().then(() => startScan()).catch(() => {
+            v.play().then(() => startScan()).catch(console.warn);
           });
         };
       }, 100);
     } catch (err) {
-      alert('Camera access denied. Allow camera and reload.\n' + err.message);
+      alert('Camera denied — allow and reload.\n' + err.message);
       setStage('start');
     }
   };
 
-  /* ── Scan Loop ───── */
+  /* ── Scan Loop ── */
   const startScan = () => {
     matchStreak.current = 0;
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -154,54 +171,74 @@ function App() {
     intervalRef.current = setInterval(() => {
       const v = camRef.current;
       const c = canvasRef.current;
-      if (!v || !c || !refData.current) return;
+      if (!v || !c || !refHash.current) return;
       const vw = v.videoWidth, vh = v.videoHeight;
       if (!vw || !vh) return;
 
       const ctx = c.getContext('2d');
       c.width = c.height = SZ;
 
-      const crop = Math.min(vw, vh) * 0.55;
-      const sx = (vw - crop) / 2, sy = (vh - crop) / 2;
-      ctx.drawImage(v, sx, sy, crop, crop, 0, 0, SZ, SZ);
-      const camData = ctx.getImageData(0, 0, SZ, SZ).data;
+      // Try 3 crop sizes to handle different distances
+      const crops = [0.45, 0.55, 0.65];
+      let bestScore = 0;
 
-      // Three-way comparison
-      const hScore = histSim(buildHist(camData, camData.length), refHist.current);
-      const pScore = pixelSim(camData, refData.current, camData.length);
-      const eScore = edgeSim(buildEdge(camData, SZ, SZ), refEdge.current);
+      for (const cropFrac of crops) {
+        const crop = Math.min(vw, vh) * cropFrac;
+        const sx = (vw - crop) / 2, sy = (vh - crop) / 2;
+        ctx.clearRect(0, 0, SZ, SZ);
+        ctx.drawImage(v, sx, sy, crop, crop, 0, 0, SZ, SZ);
+        const camData = ctx.getImageData(0, 0, SZ, SZ).data;
 
-      // Weighted combined — edge gets most weight (structural)
-      const combined = hScore * 0.25 + pScore * 0.35 + eScore * 0.40;
-      const pct = Math.round(combined * 100);
+        // Check if frame has enough contrast (not blank/dark)
+        let minL = 255, maxL = 0;
+        for (let i = 0; i < camData.length; i += 16) {
+          const l = camData[i] * 0.299 + camData[i + 1] * 0.587 + camData[i + 2] * 0.114;
+          if (l < minL) minL = l;
+          if (l > maxL) maxL = l;
+        }
+        if (maxL - minL < 30) continue; // skip low-contrast frames
+
+        const camHash = computeAHash(camData, SZ, SZ);
+        const camFP = computeBlockFP(camData, SZ, SZ);
+
+        const hSim = hashSimilarity(camHash, refHash.current);
+        const fSim = fpSimilarity(camFP, refFP.current);
+
+        // Combined: hash is primary (very discriminative), FP is secondary
+        const combined = hSim * 0.55 + fSim * 0.45;
+        if (combined > bestScore) bestScore = combined;
+      }
+
+      const pct = Math.min(Math.round(bestScore * 100), 100);
       setSimScore(pct);
 
-      if (combined >= MATCH_THRESHOLD) {
+      if (bestScore >= THRESHOLD) {
         matchStreak.current++;
-        if (matchStreak.current >= REQUIRED_STREAK) {
+        if (matchStreak.current >= STREAK_NEEDED) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
           setStage('matched');
           setTimeout(() => {
-            if (overlayRef.current) overlayRef.current.play().catch(() => {});
-          }, 400);
+            overlayRef.current?.play().catch(() => {});
+          }, 300);
         }
       } else {
-        matchStreak.current = 0;
+        matchStreak.current = Math.max(0, matchStreak.current - 1);
       }
     }, 500);
   };
 
   const scanAgain = () => {
-    if (overlayRef.current) overlayRef.current.pause();
+    if (overlayRef.current) { overlayRef.current.pause(); overlayRef.current.currentTime = 0; }
     setSimScore(0);
     setStage('scanning');
     startScan();
   };
 
-  /* ── RENDER ───── */
   return (
     <div className="app">
+
+      {/* ─── START SCREEN ─── */}
       {stage === 'start' && (
         <div className="start-screen">
           <div className="glow glow-1" />
@@ -219,19 +256,18 @@ function App() {
         </div>
       )}
 
+      {/* ─── CAMERA VIEW ─── */}
       {(stage === 'scanning' || stage === 'matched') && (
         <div className="cam-screen">
+          {/* Live camera — always visible */}
           <video
             ref={camRef}
             autoPlay playsInline muted
-            style={{
-              position: 'absolute', top: 0, left: 0,
-              width: '100%', height: '100%',
-              objectFit: 'cover', zIndex: 1, background: '#000',
-            }}
+            className="cam-feed"
           />
           <canvas ref={canvasRef} style={{ display: 'none' }} />
 
+          {/* SCANNING — frame + bar */}
           {stage === 'scanning' && (
             <div className="scan-overlay">
               <div className="scan-frame">
@@ -247,21 +283,28 @@ function App() {
                 <div className="sim-bar-wrap">
                   <div className="sim-bar" style={{ width: `${simScore}%` }} />
                 </div>
-                <p className="sim-pct">{simScore}% match</p>
+                <p className="sim-pct">{simScore}%</p>
               </div>
             </div>
           )}
 
+          {/* MATCHED — video plays INSIDE the frame area, camera visible around */}
           {stage === 'matched' && (
-            <div className="match-overlay">
-              <video
-                ref={overlayRef}
-                src={referenceVideo}
-                controls autoPlay playsInline
-                className="overlay-video"
-              />
-              <div className="match-bar">
-                <span className="match-badge">✅ Image Matched!</span>
+            <div className="ar-overlay">
+              <div className="ar-frame">
+                <span className="corner c-tl ar-corner" />
+                <span className="corner c-tr ar-corner" />
+                <span className="corner c-bl ar-corner" />
+                <span className="corner c-br ar-corner" />
+                <video
+                  ref={overlayRef}
+                  src={referenceVideo}
+                  autoPlay playsInline
+                  className="ar-video"
+                />
+              </div>
+              <div className="ar-controls">
+                <span className="match-badge">✅ Matched!</span>
                 <button className="again-btn" onClick={scanAgain}>🔄 Scan Again</button>
               </div>
             </div>
