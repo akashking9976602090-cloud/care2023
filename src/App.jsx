@@ -98,6 +98,7 @@ function App() {
   const [simScore, setSimScore] = useState(0);
   const [passcode, setPasscode] = useState('');
   const [passcodeError, setPasscodeError] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(true);
 
   const camRef = useRef(null);
   const canvasRef = useRef(null);
@@ -235,6 +236,7 @@ function App() {
     setSimScore(0);
     setPasscode('');
     setPasscodeError(false);
+    setVideoLoading(true);
     setStage('start');
   };
 
@@ -244,8 +246,10 @@ function App() {
     const MIN = 810723106001;
     const MAX = 810723106061;
     if (num >= MIN && num <= MAX) {
+      setPasscode('');
       setPasscodeError(false);
       stopAll();
+      setVideoLoading(true);
       setStage('matched');
       setTimeout(() => {
         overlayRef.current?.play().catch(() => {});
@@ -301,9 +305,9 @@ function App() {
       )}
 
       {/* ─── CAMERA VIEW ─── */}
-      {(stage === 'scanning' || stage === 'matched') && (
+      {(stage === 'scanning') && (
         <div className="cam-screen">
-          {/* Live camera — always visible */}
+          {/* Live camera */}
           <video
             ref={camRef}
             autoPlay playsInline muted
@@ -312,47 +316,44 @@ function App() {
           <canvas ref={canvasRef} style={{ display: 'none' }} />
 
           {/* SCANNING — frame + bar */}
-          {stage === 'scanning' && (
-            <div className="scan-overlay">
-              <div className="scan-frame">
-                <span className="corner c-tl" />
-                <span className="corner c-tr" />
-                <span className="corner c-bl" />
-                <span className="corner c-br" />
-                <div className="scan-line" />
-              </div>
-              <div className="scan-info">
-                <p className="scan-label">🔍 Scanning…</p>
-                <p className="scan-hint">Hold the printed photo inside the frame</p>
-                <div className="sim-bar-wrap">
-                  <div className="sim-bar" style={{ width: `${simScore}%` }} />
-                </div>
-                <p className="sim-pct">{simScore}%</p>
-              </div>
+          <div className="scan-overlay">
+            <div className="scan-frame">
+              <span className="corner c-tl" />
+              <span className="corner c-tr" />
+              <span className="corner c-bl" />
+              <span className="corner c-br" />
+              <div className="scan-line" />
             </div>
-          )}
+            <div className="scan-info">
+              <p className="scan-label">🔍 Scanning…</p>
+              <p className="scan-hint">Hold the printed photo inside the frame</p>
+              <div className="sim-bar-wrap">
+                <div className="sim-bar" style={{ width: `${simScore}%` }} />
+              </div>
+              <p className="sim-pct">{simScore}%</p>
+            </div>
+          </div>
+        </div>
+      )}
 
-          {/* MATCHED — video plays INSIDE the frame area, camera visible around */}
-          {stage === 'matched' && (
-            <div className="ar-overlay">
-              <div className="ar-frame">
-                <span className="corner c-tl ar-corner" />
-                <span className="corner c-tr ar-corner" />
-                <span className="corner c-bl ar-corner" />
-                <span className="corner c-br ar-corner" />
-                <video
-                  ref={overlayRef}
-                  src={referenceVideo}
-                  autoPlay playsInline
-                  className="ar-video"
-                />
-              </div>
-              <div className="ar-controls">
-                <span className="match-badge">✅ Matched!</span>
-                <button className="again-btn" onClick={scanAgain}>🔄 Scan Again</button>
-              </div>
+      {/* ─── FULLSCREEN VIDEO ─── */}
+      {stage === 'matched' && (
+        <div className="fullscreen-video-wrap">
+          {videoLoading && (
+            <div className="sweet-loading">
+              <div className="sweet-spinner" />
+              <p className="sweet-text">Sweet Memories Loading<span className="dots">...</span></p>
             </div>
           )}
+          <video
+            ref={overlayRef}
+            src={referenceVideo}
+            autoPlay playsInline
+            className="fullscreen-video"
+            onCanPlay={() => setVideoLoading(false)}
+            style={{ opacity: videoLoading ? 0 : 1 }}
+          />
+          <button className="close-video-btn" onClick={scanAgain}>✕</button>
         </div>
       )}
     </div>
