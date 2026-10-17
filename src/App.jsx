@@ -99,6 +99,7 @@ function App() {
   const [passcode, setPasscode] = useState('');
   const [passcodeError, setPasscodeError] = useState(false);
   const [videoLoading, setVideoLoading] = useState(true);
+  const [videoReady, setVideoReady] = useState(false);
 
   const camRef = useRef(null);
   const canvasRef = useRef(null);
@@ -237,6 +238,7 @@ function App() {
     setPasscode('');
     setPasscodeError(false);
     setVideoLoading(true);
+    setVideoReady(false);
     setStage('start');
   };
 
@@ -250,6 +252,7 @@ function App() {
       setPasscodeError(false);
       stopAll();
       setVideoLoading(true);
+      setVideoReady(false);
       setStage('matched');
       setTimeout(() => {
         overlayRef.current?.play().catch(() => {});
@@ -339,19 +342,38 @@ function App() {
       {/* ─── FULLSCREEN VIDEO ─── */}
       {stage === 'matched' && (
         <div className="fullscreen-video-wrap">
+          {/* Loading screen */}
           {videoLoading && (
             <div className="sweet-loading">
               <div className="sweet-spinner" />
               <p className="sweet-text">Sweet Memories Loading<span className="dots">...</span></p>
             </div>
           )}
+
+          {/* Tap to play — shown after load, before user taps */}
+          {!videoLoading && !videoReady && (
+            <div
+              className="tap-play-overlay"
+              onClick={() => {
+                overlayRef.current?.play().catch(() => {});
+                setVideoReady(true);
+              }}
+            >
+              <div className="tap-play-btn">
+                <span className="tap-play-icon">▶</span>
+              </div>
+              <p className="tap-play-label">Tap to Play</p>
+            </div>
+          )}
+
           <video
             ref={overlayRef}
             src={referenceVideo}
-            autoPlay playsInline
+            playsInline
+            preload="auto"
             className="fullscreen-video"
             onCanPlay={() => setVideoLoading(false)}
-            style={{ opacity: videoLoading ? 0 : 1 }}
+            style={{ opacity: videoReady ? 1 : 0 }}
           />
           <button className="close-video-btn" onClick={scanAgain}>✕</button>
         </div>
