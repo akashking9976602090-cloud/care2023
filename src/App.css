@@ -275,18 +275,43 @@ html,body,#root{
 @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
 
 /* ══════════════════════════════
-   FULLSCREEN VIDEO
+   FULLSCREEN VIDEO — always landscape
 ══════════════════════════════ */
 .fullscreen-video-wrap{
   position:fixed;inset:0;z-index:999;
   background:#000;
-  display:flex;flex-direction:column;
-  align-items:stretch;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;
+}
+
+/* ── Portrait phones: rotate the whole wrapper 90° so video fills the screen ── */
+@media (orientation: portrait) {
+  .landscape-rotator{
+    width:100vh;
+    height:100vw;
+    transform:rotate(90deg);
+    transform-origin:center center;
+    position:absolute;
+    top:50%;left:50%;
+    margin-top:calc(-50vw);
+    margin-left:calc(-50vh);
+  }
+}
+
+/* ── Landscape phones / desktops: normal full-screen ── */
+@media (orientation: landscape) {
+  .landscape-rotator{
+    width:100vw;
+    height:100vh;
+    transform:none;
+    position:absolute;
+    top:0;left:0;
+  }
 }
 
 .fullscreen-iframe{
-  flex:1;
   width:100%;
+  height:100%;
   border:none;
   transition:opacity .6s ease;
   background:#000;
@@ -294,17 +319,32 @@ html,body,#root{
 }
 
 .close-video-btn{
-  position:absolute;
-  top:14px;right:14px;
-  width:40px;height:40px;border-radius:50%;
-  border:none;cursor:pointer;z-index:1100;
-  background:rgba(0,0,0,.55);
+  position:fixed;
+  z-index:1100;
+  border:none;cursor:pointer;
+  background:rgba(0,0,0,.6);
   backdrop-filter:blur(10px);
   color:#fff;font-size:1rem;font-weight:700;
   display:flex;align-items:center;justify-content:center;
   transition:all .22s;
   box-shadow:0 2px 14px rgba(0,0,0,.5);
   border:1.5px solid rgba(255,255,255,.18);
+}
+
+/* Portrait: close btn appears rotated-aware (bottom-left of rotated view = top-right of phone) */
+@media (orientation: portrait) {
+  .close-video-btn{
+    top:auto;
+    bottom:14px;
+    left:14px;
+    width:40px;height:40px;border-radius:50%;
+  }
+}
+@media (orientation: landscape) {
+  .close-video-btn{
+    top:14px;right:14px;
+    width:40px;height:40px;border-radius:50%;
+  }
 }
 .close-video-btn:hover{background:rgba(255,0,80,.7);transform:scale(1.1)}
 .close-video-btn:active{transform:scale(.9)}

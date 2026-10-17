@@ -100,6 +100,7 @@ function App() {
   const [passcode, setPasscode] = useState('');
   const [passcodeError, setPasscodeError] = useState(false);
   const [videoLoading, setVideoLoading] = useState(true);
+  const [iframeReady, setIframeReady] = useState(false);
 
   const camRef = useRef(null);
   const canvasRef = useRef(null);
@@ -107,6 +108,8 @@ function App() {
   const streamRef = useRef(null);
   const intervalRef = useRef(null);
   const rafRef = useRef(null);
+  const preloadRef = useRef(null);   // hidden preload iframe
+  const loadTimerRef = useRef(null); // fallback timeout
 
   // Reference fingerprints
   const refHash = useRef(null);
@@ -117,8 +120,24 @@ function App() {
   const THRESHOLD = 0.78;
   const STREAK_NEEDED = 4;
 
-  /* ── Precompute reference fingerprints ── */
+  /* ── Precompute reference fingerprints + silently preload iframe ── */
   useEffect(() => {
+    // 1️⃣ Preload Google Drive iframe in a hidden element
+    const preloadIframe = document.createElement('iframe');
+    preloadIframe.src = GDRIVE_EMBED;
+    preloadIframe.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:none;';
+    preloadIframe.setAttribute('allow', 'autoplay; fullscreen');
+    preloadIframe.onload = () => {
+      setIframeReady(true);
+      setVideoLoading(false);
+    };
+    document.body.appendChild(preloadIframe);
+    preloadRef.current = preloadIframe;
+
+    // 2️⃣ Fallback: hide spinner after 6s even if onLoad hasn’t fired
+    loadTimerRef.current = setTimeout(() => setVideoLoading(false), 6000);
+
+    // 3️⃣ Reference image fingerprints
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -130,7 +149,15 @@ function App() {
       refFP.current = computeBlockFP(data, SZ, SZ);
     };
     img.src = referenceImage;
-    return () => stopAll();
+
+    return () => {
+      stopAll();
+      clearTimeout(loadTimerRef.current);
+      if (preloadRef.current) {
+        document.body.removeChild(preloadRef.current);
+        preloadRef.current = null;
+      }
+    };
   }, []);
 
   const stopAll = () => {
@@ -234,7 +261,7 @@ function App() {
     setSimScore(0);
     setPasscode('');
     setPasscodeError(false);
-    setVideoLoading(true);
+    // Don’t reset videoLoading — iframe is already preloaded
     setStage('start');
   };
 
@@ -334,7 +361,7 @@ function App() {
       {/* ─── FULLSCREEN VIDEO (Google Drive iframe) ─── */}
       {stage === 'matched' && (
         <div className="fullscreen-video-wrap">
-          {/* Loading screen */}
+          {/* Loading screen — hidden once preload fires or 6s timeout hits */}
           {videoLoading && (
             <div className="sweet-loading">
               <div className="sweet-spinner" />
@@ -342,16 +369,20 @@ function App() {
             </div>
           )}
 
-          <iframe
-            src={GDRIVE_EMBED}
-            className="fullscreen-iframe"
-            allow="autoplay; fullscreen"
-            allowFullScreen
-            frameBorder="0"
-            onLoad={() => setVideoLoading(false)}
-            style={{ opacity: videoLoading ? 0 : 1 }}
-            title="Sweet Memories"
-          />
+          {/* landscape-rotator: portrait phones get rotated 90° → video always horizontal */}
+          <div className="landscape-rotator">
+            <iframe
+              src={GDRIVE_EMBED}
+              className="fullscreen-iframe"
+              allow="autoplay; fullscreen"
+              allowFullScreen
+              frameBorder="0"
+              onLoad={() => setVideoLoading(false)}
+              style={{ opacity: videoLoading ? 0 : 1, transition: 'opacity 0.4s ease' }}
+              title="Sweet Memories"
+            />
+          </div>
+
           <button className="close-video-btn" onClick={scanAgain}>✕</button>
         </div>
       )}
