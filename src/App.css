@@ -280,48 +280,34 @@ html,body,#root{
 .fullscreen-video-wrap{
   position:fixed;inset:0;z-index:999;
   background:#000;
-  display:flex;align-items:center;justify-content:center;
-}
-
-/* ── Force landscape on portrait devices ── */
-@media (orientation: portrait) {
-  .fullscreen-video-wrap{
-    width:100vh;
-    height:100vw;
-    top:50%;
-    left:50%;
-    transform:translate(-50%,-50%) rotate(90deg);
-    transform-origin:center center;
-  }
+  display:flex;flex-direction:column;
+  align-items:stretch;
 }
 
 .fullscreen-iframe{
-  width:100%;height:100%;
+  flex:1;
+  width:100%;
   border:none;
-  transition:opacity .5s ease;
+  transition:opacity .6s ease;
   background:#000;
+  display:block;
 }
+
 .close-video-btn{
   position:absolute;
-  /* counter-rotate so ✕ stays upright on portrait devices */
-  top:18px;right:18px;
-  width:44px;height:44px;border-radius:50%;
-  border:none;cursor:pointer;z-index:1001;
-  background:rgba(255,255,255,.15);
-  backdrop-filter:blur(8px);
-  color:#fff;font-size:1.2rem;
+  top:14px;right:14px;
+  width:40px;height:40px;border-radius:50%;
+  border:none;cursor:pointer;z-index:1100;
+  background:rgba(0,0,0,.55);
+  backdrop-filter:blur(10px);
+  color:#fff;font-size:1rem;font-weight:700;
   display:flex;align-items:center;justify-content:center;
-  transition:all .25s;
-  box-shadow:0 2px 12px rgba(0,0,0,.4);
+  transition:all .22s;
+  box-shadow:0 2px 14px rgba(0,0,0,.5);
+  border:1.5px solid rgba(255,255,255,.18);
 }
-@media (orientation: portrait){
-  .close-video-btn{
-    top:18px;right:18px;
-    transform:rotate(-90deg);
-  }
-}
-.close-video-btn:hover{background:rgba(255,255,255,.28)}
-.close-video-btn:active{transform:scale(.92)}
+.close-video-btn:hover{background:rgba(255,0,80,.7);transform:scale(1.1)}
+.close-video-btn:active{transform:scale(.9)}
 
 /* ══════════════════════════════
    SWEET MEMORIES LOADING
