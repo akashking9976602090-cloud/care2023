@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import './App.css';
 import referenceImage from './assets/image.jpeg';
-import referenceVideo from './assets/video.mp4';
+
+const GDRIVE_EMBED = 'https://drive.google.com/file/d/1WI8jA9oNjiNt3benXVCnDbJ149VXHPRP/preview';
 
 /* ══════════════════════════════════════════════════════════
    PERCEPTUAL HASH + BLOCK FINGERPRINT IMAGE MATCHER
@@ -99,7 +100,6 @@ function App() {
   const [passcode, setPasscode] = useState('');
   const [passcodeError, setPasscodeError] = useState(false);
   const [videoLoading, setVideoLoading] = useState(true);
-  const [videoReady, setVideoReady] = useState(false);
 
   const camRef = useRef(null);
   const canvasRef = useRef(null);
@@ -221,10 +221,8 @@ function App() {
         if (matchStreak.current >= STREAK_NEEDED) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
+          setVideoLoading(true);
           setStage('matched');
-          setTimeout(() => {
-            overlayRef.current?.play().catch(() => {});
-          }, 300);
         }
       } else {
         matchStreak.current = Math.max(0, matchStreak.current - 1);
@@ -233,12 +231,10 @@ function App() {
   };
 
   const scanAgain = () => {
-    if (overlayRef.current) { overlayRef.current.pause(); overlayRef.current.currentTime = 0; }
     setSimScore(0);
     setPasscode('');
     setPasscodeError(false);
     setVideoLoading(true);
-    setVideoReady(false);
     setStage('start');
   };
 
@@ -252,11 +248,7 @@ function App() {
       setPasscodeError(false);
       stopAll();
       setVideoLoading(true);
-      setVideoReady(false);
       setStage('matched');
-      setTimeout(() => {
-        overlayRef.current?.play().catch(() => {});
-      }, 300);
     } else {
       setPasscodeError(true);
       setTimeout(() => setPasscodeError(false), 1500);
@@ -339,7 +331,7 @@ function App() {
         </div>
       )}
 
-      {/* ─── FULLSCREEN VIDEO ─── */}
+      {/* ─── FULLSCREEN VIDEO (Google Drive iframe) ─── */}
       {stage === 'matched' && (
         <div className="fullscreen-video-wrap">
           {/* Loading screen */}
@@ -350,30 +342,15 @@ function App() {
             </div>
           )}
 
-          {/* Tap to play — shown after load, before user taps */}
-          {!videoLoading && !videoReady && (
-            <div
-              className="tap-play-overlay"
-              onClick={() => {
-                overlayRef.current?.play().catch(() => {});
-                setVideoReady(true);
-              }}
-            >
-              <div className="tap-play-btn">
-                <span className="tap-play-icon">▶</span>
-              </div>
-              <p className="tap-play-label">Tap to Play</p>
-            </div>
-          )}
-
-          <video
-            ref={overlayRef}
-            src={referenceVideo}
-            playsInline
-            preload="auto"
-            className="fullscreen-video"
-            onCanPlay={() => setVideoLoading(false)}
-            style={{ opacity: videoReady ? 1 : 0 }}
+          <iframe
+            src={GDRIVE_EMBED}
+            className="fullscreen-iframe"
+            allow="autoplay; fullscreen"
+            allowFullScreen
+            frameBorder="0"
+            onLoad={() => setVideoLoading(false)}
+            style={{ opacity: videoLoading ? 0 : 1 }}
+            title="Sweet Memories"
           />
           <button className="close-video-btn" onClick={scanAgain}>✕</button>
         </div>
