@@ -96,6 +96,8 @@ const getImageData = (ctx, source, size) => {
 function App() {
   const [stage, setStage] = useState('start');
   const [simScore, setSimScore] = useState(0);
+  const [passcode, setPasscode] = useState('');
+  const [passcodeError, setPasscodeError] = useState(false);
 
   const camRef = useRef(null);
   const canvasRef = useRef(null);
@@ -231,8 +233,27 @@ function App() {
   const scanAgain = () => {
     if (overlayRef.current) { overlayRef.current.pause(); overlayRef.current.currentTime = 0; }
     setSimScore(0);
-    setStage('scanning');
-    startScan();
+    setPasscode('');
+    setPasscodeError(false);
+    setStage('start');
+  };
+
+  /* ── Passcode Entry ── */
+  const handlePasscode = () => {
+    const num = parseInt(passcode, 10);
+    const MIN = 810723106001;
+    const MAX = 810723106061;
+    if (num >= MIN && num <= MAX) {
+      setPasscodeError(false);
+      stopAll();
+      setStage('matched');
+      setTimeout(() => {
+        overlayRef.current?.play().catch(() => {});
+      }, 300);
+    } else {
+      setPasscodeError(true);
+      setTimeout(() => setPasscodeError(false), 1500);
+    }
   };
 
   return (
@@ -251,6 +272,29 @@ function App() {
               <span className="cam-btn-icon">🔓</span>
               Open Camera
             </button>
+
+            <div className="divider-row">
+              <span className="divider-line" />
+              <span className="divider-text">or enter passcode</span>
+              <span className="divider-line" />
+            </div>
+
+            <div className={`passcode-wrap${passcodeError ? ' shake' : ''}`}>
+              <input
+                className="passcode-input"
+                type="number"
+                placeholder="Enter your number (e.g. 810723106003)"
+                value={passcode}
+                onChange={e => setPasscode(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handlePasscode()}
+              />
+              <button className="passcode-btn" onClick={handlePasscode}>
+                <span>▶</span>
+              </button>
+            </div>
+            {passcodeError && (
+              <p className="passcode-error">❌ Invalid number. Try again!</p>
+            )}
           </div>
           <footer className="start-footer">🎓 CE College · Batch 2023–2027</footer>
         </div>

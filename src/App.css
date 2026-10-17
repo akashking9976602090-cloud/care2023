@@ -216,3 +216,60 @@ html,body,#root{
   from{box-shadow:0 0 0 3px rgba(168,85,247,.7),0 0 25px rgba(168,85,247,.3),0 20px 60px rgba(0,0,0,.6)}
   to{box-shadow:0 0 0 3px rgba(16,185,129,.8),0 0 35px rgba(16,185,129,.4),0 20px 60px rgba(0,0,0,.6)}
 }
+
+/* ══════════════════════════════
+   PASSCODE SECTION
+══════════════════════════════ */
+.divider-row{
+  display:flex;align-items:center;gap:12px;
+  margin:28px auto 20px;width:100%;max-width:340px;
+}
+.divider-line{flex:1;height:1px;background:rgba(255,255,255,.12)}
+.divider-text{color:#64748b;font-size:.78rem;font-weight:500;white-space:nowrap;letter-spacing:.04em}
+
+.passcode-wrap{
+  display:flex;align-items:center;gap:8px;
+  width:100%;max-width:340px;margin:0 auto;
+}
+.passcode-input{
+  flex:1;padding:14px 18px;
+  border:1.5px solid rgba(124,58,237,.35);border-radius:50px;
+  background:rgba(255,255,255,.05);
+  color:#f1f5f9;font-size:.9rem;font-family:'Inter',sans-serif;
+  outline:none;transition:border-color .3s,box-shadow .3s;
+  -moz-appearance:textfield;
+}
+.passcode-input::-webkit-outer-spin-button,
+.passcode-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.passcode-input::placeholder{color:#475569}
+.passcode-input:focus{
+  border-color:#a855f7;
+  box-shadow:0 0 0 3px rgba(168,85,247,.25);
+}
+.passcode-btn{
+  width:48px;height:48px;border-radius:50%;
+  border:none;cursor:pointer;
+  background:linear-gradient(135deg,#7c3aed,#a855f7);
+  color:#fff;font-size:1.1rem;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 18px rgba(124,58,237,.5);
+  transition:all .25s;flex-shrink:0;
+}
+.passcode-btn:hover{transform:scale(1.1);box-shadow:0 6px 24px rgba(124,58,237,.7)}
+.passcode-btn:active{transform:scale(.94)}
+
+.passcode-error{
+  color:#f87171;font-size:.82rem;margin-top:10px;
+  text-align:center;animation:fadeIn .2s ease;
+}
+
+/* shake on wrong passcode */
+.passcode-wrap.shake{animation:shake .4s ease}
+@keyframes shake{
+  0%,100%{transform:translateX(0)}
+  20%{transform:translateX(-8px)}
+  40%{transform:translateX(8px)}
+  60%{transform:translateX(-6px)}
+  80%{transform:translateX(6px)}
+}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
