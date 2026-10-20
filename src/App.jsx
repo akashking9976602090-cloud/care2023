@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import './App.css';
 import referenceImage from './assets/image.jpeg';
 
-const GDRIVE_EMBED = 'https://drive.google.com/file/d/1WI8jA9oNjiNt3benXVCnDbJ149VXHPRP/preview';
+const GDRIVE_EMBED = 'https://drive.google.com/file/d/1hytimPPULHw-EyX2nlKDuYPYi3tQUdBW/preview';
 
 /* ══════════════════════════════════════════════════════════
    PERCEPTUAL HASH + BLOCK FINGERPRINT IMAGE MATCHER
